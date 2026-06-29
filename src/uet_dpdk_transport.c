@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <rte_eal.h>
+#include <rte_errno.h>
 #include <rte_ethdev.h>
 #include <rte_mbuf.h>
 #include <rte_version.h>
@@ -45,6 +46,7 @@ struct uet_dpdk_transport *uet_dpdk_transport_create(
     struct rte_eth_conf port_conf;
     char mempool_name[64];
     int eal_result;
+    int result;
 
     if (!uet_transport_config_is_valid(config)) {
         errno = EINVAL;
@@ -81,40 +83,59 @@ struct uet_dpdk_transport *uet_dpdk_transport_create(
         RTE_MBUF_DEFAULT_BUF_SIZE,
         rte_socket_id());
     if (transport->mempool == NULL) {
+        errno = rte_errno != 0 ? rte_errno : ENOMEM;
         rte_eal_cleanup();
         free(transport);
-        errno = ENOMEM;
         return NULL;
     }
 
     memset(&port_conf, 0, sizeof(port_conf));
 
-    if (rte_eth_dev_configure(transport->config.port_id, 1, 1, &port_conf) < 0 ||
-        rte_eth_rx_queue_setup(
-            transport->config.port_id,
-            transport->config.rx_queue_id,
-            UET_RX_DESC,
-            rte_eth_dev_socket_id(transport->config.port_id),
-            NULL,
-            transport->mempool) < 0 ||
-        rte_eth_tx_queue_setup(
-            transport->config.port_id,
-            transport->config.tx_queue_id,
-            UET_TX_DESC,
-            rte_eth_dev_socket_id(transport->config.port_id),
-            NULL) < 0 ||
-        rte_eth_dev_start(transport->config.port_id) < 0) {
-        rte_mempool_free(transport->mempool);
-        rte_eal_cleanup();
-        free(transport);
-        errno = EIO;
-        return NULL;
+    result = rte_eth_dev_configure(transport->config.port_id, 1, 1, &port_conf);
+    if (result < 0) {
+        errno = -result;
+        goto fail;
+    }
+
+    result = rte_eth_rx_queue_setup(
+        transport->config.port_id,
+        transport->config.rx_queue_id,
+        UET_RX_DESC,
+        rte_eth_dev_socket_id(transport->config.port_id),
+        NULL,
+        transport->mempool);
+    if (result < 0) {
+        errno = -result;
+        goto fail;
+    }
+
+    result = rte_eth_tx_queue_setup(
+        transport->config.port_id,
+        transport->config.tx_queue_id,
+        UET_TX_DESC,
+        rte_eth_dev_socket_id(transport->config.port_id),
+        NULL);
+    if (result < 0) {
+        errno = -result;
+        goto fail;
+    }
+
+    result = rte_eth_dev_start(transport->config.port_id);
+    if (result < 0) {
+        errno = -result;
+        goto fail;
     }
 
     rte_eth_promiscuous_enable(transport->config.port_id);
     transport->started = true;
 
     return transport;
+
+fail:
+    rte_mempool_free(transport->mempool);
+    rte_eal_cleanup();
+    free(transport);
+    return NULL;
 }
 
 void uet_dpdk_transport_destroy(struct uet_dpdk_transport *transport)
