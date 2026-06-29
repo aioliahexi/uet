@@ -119,13 +119,12 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    if (uet_dpdk_transport_send(
+    if (uet_dpdk_transport_write(
             transport,
             message,
             (uint16_t)message_length,
-            1,
-            0) != 0) {
-        perror("uet_dpdk_transport_send");
+            1) != 0) {
+        perror("uet_dpdk_transport_write");
         uet_dpdk_transport_destroy(transport);
         return EXIT_FAILURE;
     }

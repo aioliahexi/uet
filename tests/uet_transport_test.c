@@ -69,10 +69,69 @@ static void test_reject_short_buffer(void)
     assert(uet_transport_decode_header(&header, encoded, sizeof(encoded) - 1) < 0);
 }
 
+static void test_opcode_values(void)
+{
+    /* Verify the opcode constants fit in a uint8_t and are distinct. */
+    assert(UET_OP_WRITE         <= 0xffU);
+    assert(UET_OP_READ_REQUEST  <= 0xffU);
+    assert(UET_OP_READ_RESPONSE <= 0xffU);
+    assert(UET_OP_WRITE         != UET_OP_READ_REQUEST);
+    assert(UET_OP_WRITE         != UET_OP_READ_RESPONSE);
+    assert(UET_OP_READ_REQUEST  != UET_OP_READ_RESPONSE);
+
+    /* Verify a WRITE header encodes the right opcode. */
+    struct uet_transport_header h = {
+        .version = UET_TRANSPORT_VERSION,
+        .flags = UET_OP_WRITE,
+        .header_length = UET_TRANSPORT_HEADER_LENGTH,
+        .flow_id = 42U,
+        .sequence_number = 1U,
+        .acknowledgement_number = 0U,
+        .payload_length = 64U,
+        .checksum = 0U,
+    };
+    struct uet_transport_header decoded = {0};
+    uint8_t buf[UET_TRANSPORT_HEADER_LENGTH];
+
+    assert(uet_transport_encode_header(&h, buf, sizeof(buf)) == 0);
+    assert(uet_transport_decode_header(&decoded, buf, sizeof(buf)) == 0);
+    assert(decoded.flags == UET_OP_WRITE);
+}
+
+static void test_read_request_round_trip(void)
+{
+    struct uet_read_request_payload in = {
+        .remote_addr = 0xDEADBEEFCAFEBABEULL,
+        .read_length = 0x00001000U,
+    };
+    struct uet_read_request_payload out = {0};
+    uint8_t buf[UET_READ_REQUEST_PAYLOAD_LENGTH];
+
+    assert(uet_transport_encode_read_request(&in, buf, sizeof(buf)) == 0);
+    assert(uet_transport_decode_read_request(&out, buf, sizeof(buf)) == 0);
+    assert(out.remote_addr  == in.remote_addr);
+    assert(out.read_length  == in.read_length);
+}
+
+static void test_read_request_reject_short_buffer(void)
+{
+    struct uet_read_request_payload req = {
+        .remote_addr = 0xABCDULL,
+        .read_length = 128U,
+    };
+    uint8_t buf[UET_READ_REQUEST_PAYLOAD_LENGTH];
+
+    assert(uet_transport_encode_read_request(&req, buf, sizeof(buf) - 1) < 0);
+    assert(uet_transport_decode_read_request(&req, buf, sizeof(buf) - 1) < 0);
+}
+
 int main(void)
 {
     test_config_validation();
     test_header_round_trip();
     test_reject_short_buffer();
+    test_opcode_values();
+    test_read_request_round_trip();
+    test_read_request_reject_short_buffer();
     return 0;
 }

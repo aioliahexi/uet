@@ -94,10 +94,58 @@ int uet_transport_decode_header(
     header->payload_length = read_u16(buffer + 16);
     header->checksum = read_u16(buffer + 18);
 
-    if (header->version != UET_TRANSPORT_VERSION ||
-        header->header_length != UET_TRANSPORT_HEADER_LENGTH) {
-        return -EPROTO;
+    return 0;
+}
+
+int uet_transport_encode_read_request(
+    const struct uet_read_request_payload *req,
+    uint8_t *buffer,
+    size_t buffer_length)
+{
+    if (req == NULL || buffer == NULL) {
+        return -EINVAL;
     }
+
+    if (buffer_length < UET_READ_REQUEST_PAYLOAD_LENGTH) {
+        return -EMSGSIZE;
+    }
+
+    buffer[0] = (uint8_t)(req->remote_addr >> 56);
+    buffer[1] = (uint8_t)(req->remote_addr >> 48);
+    buffer[2] = (uint8_t)(req->remote_addr >> 40);
+    buffer[3] = (uint8_t)(req->remote_addr >> 32);
+    buffer[4] = (uint8_t)(req->remote_addr >> 24);
+    buffer[5] = (uint8_t)(req->remote_addr >> 16);
+    buffer[6] = (uint8_t)(req->remote_addr >> 8);
+    buffer[7] = (uint8_t)req->remote_addr;
+    write_u32(buffer + 8, req->read_length);
+
+    return 0;
+}
+
+int uet_transport_decode_read_request(
+    struct uet_read_request_payload *req,
+    const uint8_t *buffer,
+    size_t buffer_length)
+{
+    if (req == NULL || buffer == NULL) {
+        return -EINVAL;
+    }
+
+    if (buffer_length < UET_READ_REQUEST_PAYLOAD_LENGTH) {
+        return -EMSGSIZE;
+    }
+
+    req->remote_addr =
+        ((uint64_t)buffer[0] << 56) |
+        ((uint64_t)buffer[1] << 48) |
+        ((uint64_t)buffer[2] << 40) |
+        ((uint64_t)buffer[3] << 32) |
+        ((uint64_t)buffer[4] << 24) |
+        ((uint64_t)buffer[5] << 16) |
+        ((uint64_t)buffer[6] << 8) |
+         (uint64_t)buffer[7];
+    req->read_length = read_u32(buffer + 8);
 
     return 0;
 }

@@ -270,12 +270,81 @@ int uet_dpdk_transport_receive(
     return 0;
 }
 
-const struct uet_transport_stats *uet_dpdk_transport_stats(
-    const struct uet_dpdk_transport *transport)
+int uet_dpdk_transport_write(
+    struct uet_dpdk_transport *transport,
+    const void *payload,
+    uint16_t payload_length,
+    uint32_t sequence_number)
 {
-    if (transport == NULL) {
-        return NULL;
+    return uet_dpdk_transport_send(
+        transport,
+        payload,
+        payload_length,
+        sequence_number,
+        UET_OP_WRITE);
+}
+
+int uet_dpdk_transport_read(
+    struct uet_dpdk_transport *transport,
+    uint64_t remote_addr,
+    uint32_t read_length,
+    uint32_t sequence_number,
+    void *buffer,
+    size_t buffer_capacity,
+    uint16_t *received_length)
+{
+    uint8_t req_payload[UET_READ_REQUEST_PAYLOAD_LENGTH];
+    struct uet_transport_header resp_header;
+    uint16_t resp_payload_len;
+    int result;
+
+    if (transport == NULL || buffer == NULL || received_length == NULL) {
+        return -EINVAL;
     }
 
-    return &transport->stats;
+    /* Serialise READ_REQUEST payload (UE-Spec §8.x Read Request). */
+    {
+        struct uet_read_request_payload rr = {
+            .remote_addr = remote_addr,
+            .read_length = read_length,
+        };
+        if (uet_transport_encode_read_request(&rr, req_payload, sizeof(req_payload)) != 0) {
+            return -EINVAL;
+        }
+    }
+
+    result = uet_dpdk_transport_send(
+        transport,
+        req_payload,
+        UET_READ_REQUEST_PAYLOAD_LENGTH,
+        sequence_number,
+        UET_OP_READ_REQUEST);
+    if (result != 0) {
+        return result;
+    }
+
+    /* Poll for a READ_RESPONSE whose sequence number matches the request.
+     * Non-matching packets are dropped until the queue is empty. */
+    do {
+        result = uet_dpdk_transport_receive(
+            transport,
+            &resp_header,
+            buffer,
+            buffer_capacity,
+            &resp_payload_len);
+
+        if (result == -EAGAIN) {
+            return -EAGAIN;
+        }
+
+        if (result != 0) {
+            return result;
+        }
+    } while (resp_header.flags != UET_OP_READ_RESPONSE ||
+             resp_header.sequence_number != sequence_number);
+
+    *received_length = resp_payload_len;
+    return 0;
 }
+
+const struct uet_transport_stats *uet_dpdk_transport_stats(
