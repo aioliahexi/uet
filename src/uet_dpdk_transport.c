@@ -20,6 +20,7 @@
 #define UET_TX_DESC 1024U
 #define UET_NB_MBUFS 8192U
 #define UET_MEMPOOL_CACHE 256U
+#define UET_READ_MAX_POLLS 1024U
 
 struct uet_dpdk_transport {
     struct uet_transport_config config;
@@ -296,13 +297,14 @@ int uet_dpdk_transport_read(
     uint8_t req_payload[UET_READ_REQUEST_PAYLOAD_LENGTH];
     struct uet_transport_header resp_header;
     uint16_t resp_payload_len;
+    unsigned int attempts;
     int result;
 
     if (transport == NULL || buffer == NULL || received_length == NULL) {
         return -EINVAL;
     }
 
-    /* Serialise READ_REQUEST payload (UE-Spec §8.x Read Request). */
+    /* Serialize READ_REQUEST payload (UE-Spec §8.x Read Request). */
     {
         struct uet_read_request_payload rr = {
             .remote_addr = remote_addr,
@@ -324,8 +326,9 @@ int uet_dpdk_transport_read(
     }
 
     /* Poll for a READ_RESPONSE whose sequence number matches the request.
-     * Non-matching packets are dropped until the queue is empty. */
-    do {
+     * Non-matching packets are dropped; give up after UET_READ_MAX_POLLS
+     * attempts to avoid spinning forever if the response never arrives. */
+    for (attempts = 0; attempts < UET_READ_MAX_POLLS; attempts++) {
         result = uet_dpdk_transport_receive(
             transport,
             &resp_header,
@@ -340,11 +343,15 @@ int uet_dpdk_transport_read(
         if (result != 0) {
             return result;
         }
-    } while (resp_header.flags != UET_OP_READ_RESPONSE ||
-             resp_header.sequence_number != sequence_number);
 
-    *received_length = resp_payload_len;
-    return 0;
+        if (resp_header.flags == UET_OP_READ_RESPONSE &&
+            resp_header.sequence_number == sequence_number) {
+            *received_length = resp_payload_len;
+            return 0;
+        }
+    }
+
+    return -ETIMEDOUT;
 }
 
 const struct uet_transport_stats *uet_dpdk_transport_stats(
