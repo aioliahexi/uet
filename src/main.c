@@ -92,6 +92,7 @@ int main(int argc, char **argv)
     const char *message = "uet";
     int app_arg_offset;
     int eal_argc;
+    size_t message_length;
 
     app_arg_offset = find_app_arg_offset(argc, argv);
     eal_argc = app_arg_offset == argc ? argc : app_arg_offset - 1;
@@ -111,10 +112,17 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    message_length = strlen(message);
+    if (message_length > 0xffffU) {
+        fprintf(stderr, "message payload is too large for the UET header\n");
+        uet_dpdk_transport_destroy(transport);
+        return EXIT_FAILURE;
+    }
+
     if (uet_dpdk_transport_send(
             transport,
             message,
-            (uint16_t)strlen(message),
+            (uint16_t)message_length,
             1,
             0) != 0) {
         perror("uet_dpdk_transport_send");

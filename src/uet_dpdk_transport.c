@@ -126,7 +126,6 @@ struct uet_dpdk_transport *uet_dpdk_transport_create(
         goto fail;
     }
 
-    rte_eth_promiscuous_enable(transport->config.port_id);
     transport->started = true;
 
     return transport;
